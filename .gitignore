@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# TouchDesigner
+*.toe.lock
+backup/
+Backup/
+crash/
+Crash/
+
+# System Files
+Thumbs.db
+desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Build artifacts
+*.o
+*.obj
+*.exe
+*.out
+*.log
+
