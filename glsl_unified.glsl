@@ -15,6 +15,12 @@
 //      Mode 2 (Blend): R channel controls blend between Pattern 1 & 2
 // ============================================================================
 
+// Precision qualifiers for better cross-platform compatibility
+#ifdef GL_ES
+precision highp float;
+precision highp int;
+#endif
+
 // === UNIFORMS ===
 uniform int uDimension;          // 0 = 2D mode, 1 = 3D mode
 uniform int uType;
@@ -78,36 +84,51 @@ float mirror(float v) {
 }
 
 // === HASH FUNCTIONS (2D and 3D) ===
+// Improved hash functions with better precision for Windows compatibility
 
 float hash2D(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    // Use a more numerically stable hash function
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
 
 float hash3D(vec3 p) {
-    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+    // Use a more numerically stable 3D hash
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
 }
 
 // === NOISE FUNCTIONS (2D and 3D) ===
+// Improved with better numerical stability for Windows
 
 float noise2D(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
+    // Hermite interpolation curve for smooth transitions
+    vec2 u = f * f * (3.0 - 2.0 * f);
     
-    float a = hash2D(i);
+    // Sample grid corners with explicit coordinates
+    float a = hash2D(i + vec2(0.0, 0.0));
     float b = hash2D(i + vec2(1.0, 0.0));
     float c = hash2D(i + vec2(0.0, 1.0));
     float d = hash2D(i + vec2(1.0, 1.0));
     
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    // Bilinear interpolation
+    float ab = mix(a, b, u.x);
+    float cd = mix(c, d, u.x);
+    return mix(ab, cd, u.y);
 }
 
 float noise3D(vec3 p) {
     vec3 i = floor(p);
     vec3 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
+    // Hermite interpolation curve for smooth transitions
+    vec3 u = f * f * (3.0 - 2.0 * f);
     
-    float a = hash3D(i);
+    // Sample 3D grid corners with explicit coordinates
+    float a = hash3D(i + vec3(0.0, 0.0, 0.0));
     float b = hash3D(i + vec3(1.0, 0.0, 0.0));
     float c = hash3D(i + vec3(0.0, 1.0, 0.0));
     float d = hash3D(i + vec3(1.0, 1.0, 0.0));
@@ -116,21 +137,33 @@ float noise3D(vec3 p) {
     float g = hash3D(i + vec3(0.0, 1.0, 1.0));
     float h = hash3D(i + vec3(1.0, 1.0, 1.0));
     
-    return mix(mix(mix(a, b, f.x), mix(c, d, f.x), f.y),
-               mix(mix(e, f_val, f.x), mix(g, h, f.x), f.y), f.z);
+    // Trilinear interpolation - broken down for clarity and precision
+    float ab = mix(a, b, u.x);
+    float cd = mix(c, d, u.x);
+    float ef = mix(e, f_val, u.x);
+    float gh = mix(g, h, u.x);
+    
+    float abcd = mix(ab, cd, u.y);
+    float efgh = mix(ef, gh, u.y);
+    
+    return mix(abcd, efgh, u.z);
 }
 
 // === VORONOI FUNCTIONS (2D and 3D) ===
+// Improved with better precision for Windows compatibility
 
 float voronoi2D(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
     
-    float minDist = 1.0;
+    float minDist = 2.0; // Slightly larger initial value for safety
     for(int y = -1; y <= 1; y++) {
         for(int x = -1; x <= 1; x++) {
             vec2 neighbor = vec2(float(x), float(y));
-            vec2 point = hash2D(i + neighbor) * vec2(1.0, 1.0);
+            // Generate random point position in this cell with better precision
+            float hash = hash2D(i + neighbor);
+            // Use more stable constants for point generation
+            vec2 point = vec2(hash, fract(hash * 7.13 + 0.423));
             vec2 diff = neighbor + point - f;
             float dist = length(diff);
             minDist = min(minDist, dist);
@@ -143,12 +176,15 @@ float voronoi3D(vec3 p) {
     vec3 i = floor(p);
     vec3 f = fract(p);
     
-    float minDist = 1.0;
+    float minDist = 2.0; // Slightly larger initial value for safety
     for(int z = -1; z <= 1; z++) {
         for(int y = -1; y <= 1; y++) {
             for(int x = -1; x <= 1; x++) {
                 vec3 neighbor = vec3(float(x), float(y), float(z));
-                vec3 point = hash3D(i + neighbor) * vec3(1.0, 1.0, 1.0);
+                // Generate random 3D point position in this cell with better precision
+                float hash = hash3D(i + neighbor);
+                // Use more stable constants for point generation
+                vec3 point = vec3(hash, fract(hash * 7.13 + 0.423), fract(hash * 5.79 + 0.831));
                 vec3 diff = neighbor + point - f;
                 float dist = length(diff);
                 minDist = min(minDist, dist);
@@ -179,12 +215,15 @@ float calculatePattern2D(int type, vec2 uv, vec2 aspect, float phase) {
         // Radial (angular)
         float aspectScale = min(aspect.x, aspect.y);
         vec2 centered = (uv - 0.5) * aspectScale;
-        float angle = atan(centered.y, centered.x);
+        // Add small offset to avoid precision issues at origin
+        float angle = atan(centered.y, centered.x + 0.0001);
         
         float segments = max(1.0, floor(uParam1 * 32.0));
         float rotation = uParam2 * pi * 2.0;
         
-        p = fract((angle + rotation) / (pi * 2.0) * segments - phase) / uPeriod;
+        // Improved division: multiply by inverse instead of divide
+        const float invTwoPi = 1.0 / (2.0 * 3.14159265359);
+        p = fract((angle + rotation) * invTwoPi * segments - phase) / uPeriod;
     } 
     else if (type == 3) {
         // Circular (concentric)
@@ -200,7 +239,8 @@ float calculatePattern2D(int type, vec2 uv, vec2 aspect, float phase) {
         // Spiral (Archimedean)
         float aspectScale = min(aspect.x, aspect.y);
         vec2 centered = (uv - 0.5) * aspectScale;
-        float angle = atan(centered.y, centered.x);
+        // Add small offset to avoid precision issues at origin
+        float angle = atan(centered.y, centered.x + 0.0001);
         float radius = length(centered);
         
         float spiralTightness = uParam1 * 10.0;
@@ -208,9 +248,10 @@ float calculatePattern2D(int type, vec2 uv, vec2 aspect, float phase) {
         
         // Proper Archimedean spiral: distance increases with angle
         // Shift angle from [-π, π] to [0, 2π], then normalize to [0, 1]
-        // Period is fixed at 0.25 for perfect tiling
-        float angleRotations = (angle + pi) / (pi * 2.0);
-        p = (radius * spiralTightness * direction - angleRotations - phase) / 0.25;
+        // Use multiplication instead of division for better precision
+        const float invTwoPi = 1.0 / (2.0 * 3.14159265359);
+        float angleRotations = (angle + pi) * invTwoPi;
+        p = (radius * spiralTightness * direction - angleRotations - phase) * 4.0; // multiply by 4 instead of divide by 0.25
     }
     else if (type == 5) {
         // Diamond (Manhattan distance)
@@ -268,13 +309,16 @@ float calculatePattern2D(int type, vec2 uv, vec2 aspect, float phase) {
         // Polar Grid
         float aspectScale = min(aspect.x, aspect.y);
         vec2 centered = (uv - 0.5) * aspectScale;
-        float angle = atan(centered.y, centered.x);
+        // Add small offset to avoid precision issues at origin
+        float angle = atan(centered.y, centered.x + 0.0001);
         float radius = length(centered);
         
         float spokes = max(1.0, uParam1 * 32.0);
         float rings = max(1.0, uParam2 * 16.0);
         
-        float anglePattern = fract((angle / (pi * 2.0) + 0.5) * spokes);
+        // Use multiplication instead of division for better precision
+        const float invTwoPi = 1.0 / (2.0 * 3.14159265359);
+        float anglePattern = fract((angle * invTwoPi + 0.5) * spokes);
         float radiusPattern = fract(radius * rings / uPeriod - phase);
         
         p = (anglePattern + radiusPattern) * 0.5;
@@ -289,7 +333,8 @@ float calculatePattern2D(int type, vec2 uv, vec2 aspect, float phase) {
         float lissX = sin(centered.x * pi * freqX + phase * pi * 2.0);
         float lissY = cos(centered.y * pi * freqY + phase * pi * 2.0);
         
-        p = (lissX + lissY + 2.0) * 0.25 / uPeriod;
+        // Use precise division
+        p = (lissX + lissY + 2.0) * (1.0 / 4.0) / uPeriod;
     }
     else if (type == 12) {
         // 2D Gyroid (slice of 3D gyroid)
@@ -321,25 +366,27 @@ float calculatePattern2D(int type, vec2 uv, vec2 aspect, float phase) {
             p_scaled.x * sinRot + p_scaled.y * cosRot
         );
         
-        // Create flow field using 2D curl noise
-        float eps = 0.1;
+        // Create flow field using 2D curl noise with better precision
+        float eps = 0.01; // Smaller epsilon for smoother gradients
         
         float n1 = noise2D(rotatedPos);
         float n2 = noise2D(rotatedPos + vec2(eps, 0.0));
         float n3 = noise2D(rotatedPos + vec2(0.0, eps));
         
-        // Calculate curl in 2D
+        // Calculate curl in 2D with normalized epsilon
         vec2 curl = vec2(
             (n3 - n1) / eps,
             (n1 - n2) / eps
         );
         
-        // Sample along flow
+        // Sample along flow with explicit float conversion
         vec2 flowPos = rotatedPos;
         float flowValue = 0.0;
+        const int flowSteps = 12;
+        float invFlowSteps = 1.0 / float(flowSteps);
         
-        for(int i = 0; i < 12; i++) {
-            float t = float(i) / 12.0;
+        for(int i = 0; i < flowSteps; i++) {
+            float t = float(i) * invFlowSteps;
             float stepSize = 0.05 * (1.0 + t * 2.0);
             vec2 samplePos = flowPos + curl * t * stepSize;
             
@@ -347,7 +394,7 @@ float calculatePattern2D(int type, vec2 uv, vec2 aspect, float phase) {
             sampleValue += noise2D(samplePos * 2.0) * 0.5;
             sampleValue += noise2D(samplePos * 4.0) * 0.25;
             
-            flowValue += sampleValue * (1.0 - t) * (1.0 / 12.0);
+            flowValue += sampleValue * (1.0 - t) * invFlowSteps;
         }
         
         // Add swirling motion
@@ -383,14 +430,17 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         // 3D Radial (cylindrical)
         float aspectScale = min(min(aspect.x, aspect.y), aspect.z);
         vec3 centered = (pos - 0.5) * aspectScale;
-        float angle = atan(centered.z, centered.x);
+        // Add small offset to avoid precision issues at origin
+        float angle = atan(centered.z, centered.x + 0.0001);
         float height = centered.y;
         
         float segments = max(1.0, floor(uParam1 * 32.0));
         float rotation = uParam2 * pi * 2.0;
         float heightFreq = uParam3 * 10.0;
         
-        p = fract((angle + rotation) / (pi * 2.0) * segments + height * heightFreq - phase) / uPeriod;
+        // Use multiplication instead of division for better precision
+        const float invTwoPi = 1.0 / (2.0 * 3.14159265359);
+        p = fract((angle + rotation) * invTwoPi * segments + height * heightFreq - phase) / uPeriod;
     } 
     else if (type == 3) {
         // 3D Spherical (concentric spheres)
@@ -404,7 +454,8 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         // 3D Spiral (helical/Archimedean)
         float aspectScale = min(aspect.x, aspect.y);
         vec3 centered = (pos - 0.5) * aspectScale;
-        float angle = atan(centered.z, centered.x);
+        // Add small offset to avoid precision issues at origin
+        float angle = atan(centered.z, centered.x + 0.0001);
         float radius = length(centered.xz);
         float height = centered.y;
         
@@ -414,9 +465,10 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         
         // Proper Archimedean spiral with height component
         // Shift angle from [-π, π] to [0, 2π], then normalize to [0, 1]
-        // Period is fixed at 0.25 for perfect tiling
-        float angleRotations = (angle + pi) / (pi * 2.0);
-        p = (radius * spiralTightness * direction - angleRotations + height * heightTightness - phase) / 0.25;
+        // Use multiplication instead of division for better precision
+        const float invTwoPi = 1.0 / (2.0 * 3.14159265359);
+        float angleRotations = (angle + pi) * invTwoPi;
+        p = (radius * spiralTightness * direction - angleRotations + height * heightTightness - phase) * 4.0; // multiply by 4 instead of divide by 0.25
     }
     else if (type == 5) {
         // 3D Diamond (octahedral)
@@ -445,7 +497,8 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         float scaleZ = 0.5 + uParam3 * 2.0;
         
         vec3 posAdjusted = (pos * aspect * vec3(scaleX, scaleY, scaleZ) - phase) / uPeriod;
-        p = (sin(posAdjusted.x * pi) + sin(posAdjusted.y * pi) + sin(posAdjusted.z * pi)) * 0.333 + 0.5;
+        // Use precise division: 1/3 instead of 0.333
+        p = (sin(posAdjusted.x * pi) + sin(posAdjusted.y * pi) + sin(posAdjusted.z * pi)) * (1.0 / 3.0) + 0.5;
     }
     else if (type == 7) {
         // 3D Wave (sine modulation in 3D)
@@ -475,18 +528,23 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         float aspectScale = min(min(aspect.x, aspect.y), aspect.z);
         vec3 centered = (pos - 0.5) * aspectScale;
         float radius = length(centered);
-        float theta = atan(centered.z, centered.x);
-        float phi = acos(centered.y / max(radius, 0.001));
+        // Add small offsets to avoid precision issues at origin and poles
+        float theta = atan(centered.z, centered.x + 0.0001);
+        float phi = acos(clamp(centered.y / max(radius, 0.001), -1.0, 1.0));
         
         float spokes = max(1.0, uParam1 * 32.0);
         float rings = max(1.0, uParam2 * 16.0);
         float layers = max(1.0, uParam3 * 8.0);
         
-        float thetaPattern = fract((theta / (pi * 2.0) + 0.5) * spokes);
-        float phiPattern = fract(phi * rings / pi);
+        // Use multiplication instead of division for better precision
+        const float invTwoPi = 1.0 / (2.0 * 3.14159265359);
+        const float invPi = 1.0 / 3.14159265359;
+        float thetaPattern = fract((theta * invTwoPi + 0.5) * spokes);
+        float phiPattern = fract(phi * rings * invPi);
         float radiusPattern = fract(radius * layers / uPeriod - phase);
         
-        p = (thetaPattern + phiPattern + radiusPattern) * 0.333;
+        // Use precise division: 1/3 instead of 0.333
+        p = (thetaPattern + phiPattern + radiusPattern) * (1.0 / 3.0);
     }
     else if (type == 11) {
         // 3D Lissajous curves
@@ -498,7 +556,8 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         float lissX = sin(centered.x * pi * freqX + phase * pi * 2.0);
         float lissY = cos(centered.y * pi * freqY + phase * pi * 2.0);
         float lissZ = sin(centered.z * pi * freqZ + phase * pi * 2.0);
-        p = (lissX + lissY + lissZ + 3.0) * 0.166 / uPeriod;
+        // Use precise division: 1/6 instead of 0.166
+        p = (lissX + lissY + lissZ + 3.0) * (1.0 / 6.0) / uPeriod;
     }
     else if (type == 12) {
         // 3D Gyroid (triply periodic minimal surface)
@@ -530,8 +589,8 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
             p_scaled.x * sinRot + p_scaled.z * cosRot
         );
         
-        // Create a proper flow field using curl noise with better sampling
-        float eps = 0.1;
+        // Create a proper flow field using curl noise with better precision
+        float eps = 0.01; // Smaller epsilon for smoother gradients
         
         // Sample noise at different offsets to create curl
         vec3 offset1 = vec3(0.0, 0.0, 0.0);
@@ -544,7 +603,7 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         float n3 = noise3D(rotatedPos + offset3);
         float n4 = noise3D(rotatedPos + offset4);
         
-        // Calculate curl (cross product of gradients) with better precision
+        // Calculate curl (cross product of gradients) with normalized epsilon
         vec3 curl = vec3(
             (n4 - n3) / eps,
             (n2 - n1) / eps,
@@ -558,10 +617,12 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
         // Create flow lines by integrating along the field
         vec3 flowPos = rotatedPos;
         float flowValue = 0.0;
+        const int flowSteps = 12;
+        float invFlowSteps = 1.0 / float(flowSteps);
         
         // Sample multiple points along the flow with variable step size
-        for(int i = 0; i < 12; i++) {
-            float t = float(i) / 12.0;
+        for(int i = 0; i < flowSteps; i++) {
+            float t = float(i) * invFlowSteps;
             float stepSize = 0.05 * (1.0 + t * 2.0); // Variable step size
             vec3 samplePos = flowPos + curl * t * stepSize;
             
@@ -570,7 +631,7 @@ float calculatePattern3D(int type, vec3 pos, vec3 aspect, float phase) {
             sampleValue += noise3D(samplePos * 2.0) * 0.5;
             sampleValue += noise3D(samplePos * 4.0) * 0.25;
             
-            flowValue += sampleValue * (1.0 - t) * (1.0 / 12.0);
+            flowValue += sampleValue * (1.0 - t) * invFlowSteps;
         }
         
         // Add swirling motion with intensity control
