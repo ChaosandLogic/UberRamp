@@ -1,4 +1,4 @@
-UberRamp - A GLSL Pattern Generator for Touchdesigner
+# UberRamp - A GLSL Pattern Generator for Touchdesigner
 
 A powerful 2D/3D procedural pattern generator for TouchDesigner with 14+ pattern types, blending, control maps, and lighting.
 
